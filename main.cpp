@@ -22,10 +22,11 @@ struct Conn_t {
     int id;
     int sockfd;
     uint16_t port;
+    
 };
 struct Package {
-    int from; 
-    int to;
+    uint16_t from; 
+    uint16_t to;
     size_t message_size;
 };
 
@@ -87,7 +88,7 @@ void Node::init_node(std::string port){
 }
 void Node::handle_error(int result){
     if (result == -1){
-        fprintf(stderr, "error: %s", strerror(errno));
+        fprintf(stderr, "error: %s\n", strerror(errno));
         exit(1);
     }
 }
@@ -97,19 +98,14 @@ Node::Node(std::string port) {
     struct sockaddr_in their_addr;
     socklen_t their_addrlen = sizeof(their_addr);
     uint16_t u_port = stoi(port);
+    std::thread send_th(&Node::handle_send, this, u_port);
+    send_th.detach();
     while(true){
-        std::thread send_th(&Node::handle_send, this, u_port);
-        send_th.detach();
         int sockfd_new = accept(sockfd, (sockaddr*)&their_addr, &their_addrlen);
-
-        //FIXME: save the correct port.
-        uint16_t port_conn = ntohs(their_addr.sin_port);
-
         Conn_t conn{.id = id, .sockfd = sockfd_new}; 
         id++;
         connections.push_back(conn);
         std::thread recv_th(&Node::handle_recv, this, sockfd_new, &their_addr);
-        printf("thread's up!\n");
         recv_th.detach();
     }
 }
@@ -117,22 +113,31 @@ Node::~Node(){
     close(sockfd);
     exit(1);
 }
-void Node::handle_recv(int sockfd, const sockaddr_in *addr){
+void Node::handle_recv(int cur_sockfd, const sockaddr_in *addr){
     int bytes, pckg_size;
-    printf("handle recv\n");
     Package pckg; 
     
-    while((bytes = recv(sockfd, &pckg, sizeof(pckg), 0)) > 0){
-        char *msg = new char[pckg.message_size + 1];
-        msg[pckg.message_size] = '\0';
-        handle_error(recv(sockfd, msg, pckg.message_size, 0));
-        printf("[%s:%d]: %s\n", inet_ntoa(addr->sin_addr), pckg.from, msg);
-        delete[] msg;
+    while((bytes = recv(cur_sockfd, &pckg, sizeof(pckg), 0)) > 0){
+        char *buff = new char[pckg.message_size + 1];
+        buff[pckg.message_size] = '\0';
+        handle_error(recv(cur_sockfd, buff, pckg.message_size, 0));
+        printf("[%s:%d]: %s\n", inet_ntoa(addr->sin_addr), pckg.from, buff);
+        delete[] buff;
+        for(std::vector<Conn_t>::iterator itr = connections.begin(); itr != connections.end(); itr++){
+            if (itr->sockfd == cur_sockfd && itr->port != pckg.from) {
+                itr->port = pckg.from;
+                close(cur_sockfd);
+                std::string port_str = std::to_string(pckg.from);
+                connect_to(port_str);
+                return;
+            } 
+        }
     }
     handle_error(bytes);
     if (bytes == 0 ){
         printf("user's disconnected\n");
-        close(sockfd);
+        close(cur_sockfd);
+        
         //TODO: delete user from connections
     }
     
@@ -142,12 +147,13 @@ void Node::connections_print(){
     printf("[+] your connections: \n");
     for (std::vector<Conn_t>::iterator itr = connections.begin();
             itr != connections.end(); itr++){
-        printf("%d : %hu \n", itr->id, itr->port);
+        printf("%d : %hu | %d \n", itr->id, itr->port, itr->sockfd);
     }
 
 }
 void Node::handle_command(std::string message, uint16_t port_me){
     int i=0;
+    uint16_t port_to;
     if (message == "/quit") exit(0);
     else if(message == "/show") connections_print();
     else {
@@ -158,14 +164,13 @@ void Node::handle_command(std::string message, uint16_t port_me){
         if (msg == "/connect"){
             std::string port = message_parse(message);
             sockfd = connect_to(port);
-            uint16_t u_port = stoi(port);
-            Conn_t new_conn{.id = id, .sockfd = sockfd, .port = u_port};
+            port_to = stoi(port);
+            Conn_t new_conn{.id = id, .sockfd = sockfd, .port = port_to};
             connections.push_back(new_conn);
             id++;
         } else if(msg == "/send"){
             std::string port = message_parse(message);
             sockfd = connect_to(port);
-            uint16_t port_to = stoi(port);
             send_to(message, port_me, port_to);
         }
 
@@ -191,15 +196,16 @@ void Node::send_to(std::string message, uint16_t port_me, uint16_t port_to){
 void Node::send_all(std::string message, uint16_t port_me){
     Package pckg {.from=port_me, .message_size = message.size()};
 
+
     for (std::vector<Conn_t>::iterator itr = connections.begin();
         itr != connections.end(); itr++){
             pckg.to = itr->port;
             handle_error(send(itr->sockfd, &pckg, sizeof(pckg), 0));
             handle_error(send(itr->sockfd, message.c_str(), message.size(), 0));
-
          }
     return;
 }
+
 
 int Node::connect_to(std::string port){
     struct sockaddr_in addr; 
