@@ -62,8 +62,11 @@ void Node::handle_send(uint16_t port, int sockfd){
     Package pckg;
     while (true) {
         std::string message = message_get();
+        message += '\n';
         if (message.at(0) == '/') {
             handle_command(message, port);
+        } else if (message == "\n"){
+            continue;
         } else {
             send_all(message, port);
         }
@@ -112,26 +115,32 @@ std::string Node::message_get() {
 
 
 void Node::handle_command(std::string message, uint16_t port_me){
-    int i=0;
+    int i=0, j; bool flag = true;
     if (message == "/quit") {
         disconnect(port_me);
         exit(0);
     }
     else if(message == "/show") connections_print();
     else {
-        while (message.at(i) != ' ') i++;
-        std::string msg = message;
-        msg.erase(i);
-        i=0;
-        std::string port = message_parse(message);
+        for (const char c: message){
+            if (c == ' ') break;
+            else if (c == '\n') flag=false;
+            i++;
+        }
+        std::string msg = message, port;
+        if (flag) msg.erase(i);
+       
         if (msg == "/connect"){
+            port = message_parse(message);
             connect_to(port);
+        
         } else if(msg == "/send"){
-            //send :PORT message 
-            int j;
+            port = message_parse(message);
             for (j=0; port[j] != ' '; j++);
+
             std::string message_to_send = port;
             message_to_send.erase(0, j+1);
+            
             uint16_t port_to = stoi(port);
             send_to(message_to_send, port_me, port_to);
         }
