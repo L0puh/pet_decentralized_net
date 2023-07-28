@@ -1,4 +1,5 @@
 #include "node.h"
+#include <cstring>
 
 int Node::init_socket(std::string port){ 
     
@@ -38,13 +39,16 @@ void Node::handle_recv(int sockfd){
         buff[pckg.message_size] = '\0';
         handle_error(recvfrom(sockfd, buff, pckg.message_size, 0, (struct sockaddr *)&their_addr, &their_addrlen) > 0);
 
-        printf("[%s:%d]: %s\n", inet_ntoa(their_addr.sin_addr), pckg.from, buff);
-        delete[] buff;
-        {
+        if (*buff == '0'){
+            printf("[ ! ] user %d is disconnected \n", pckg.from);
+            delete_user(pckg.from);
+        } else {
+            printf("[%s:%d]: %s\n", inet_ntoa(their_addr.sin_addr), pckg.from, buff);
             std::lock_guard<std::mutex> lock(mtx);
             connect_to(std::to_string(pckg.from));               
             memset(&their_addr, 0, sizeof(their_addr));
-        } 
+        }
+        delete[] buff;
     }
     handle_error(bytes);
 }
@@ -109,7 +113,10 @@ std::string Node::message_get() {
 
 void Node::handle_command(std::string message, uint16_t port_me){
     int i=0;
-    if (message == "/quit") exit(0);
+    if (message == "/quit") {
+        disconnect(port_me);
+        exit(0);
+    }
     else if(message == "/show") connections_print();
     else {
         while (message.at(i) != ' ') i++;
@@ -132,6 +139,18 @@ void Node::handle_command(std::string message, uint16_t port_me){
 }
 
 /// CONNECTION ///
+void Node::delete_user(uint16_t port_from){
+    std::vector<Conn_t>::iterator itr = connections.begin();
+    while (itr!=connections.end()){
+        if (port_from == itr->port){
+            connections.erase(itr);
+            break;
+        }
+    }
+}
+void Node::disconnect(uint16_t port_me){
+    send_all("0", port_me);
+}
 int Node::connect_to(std::string port){
     uint16_t u_port = stoi(port);
     bool exsist = false;
@@ -146,7 +165,7 @@ int Node::connect_to(std::string port){
     if (!exsist || connections.size() == 0)  {
         connections.push_back(Conn_t{.id=id, .port=u_port});
         id++;
-        printf("connected to port: %s\n", port.c_str());
+        printf("connected a to port: %s\n", port.c_str());
     }
     return 0;
 }

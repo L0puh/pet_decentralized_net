@@ -49,6 +49,8 @@ class Node {
         std::string message_parse(std::string message);
         int connect_to(std::string port);
         std::string message_get();
+        void disconnect(uint16_t port_me);
+        void delete_user(uint16_t port_from);
     public:
         void send_to(std::string message, uint16_t port_me, uint16_t port_to);
         void send_all(std::string message, uint16_t port_me);
