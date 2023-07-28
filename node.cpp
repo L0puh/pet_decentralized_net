@@ -69,26 +69,26 @@ void Node::handle_send(uint16_t port, int sockfd){
 
 /// SEND ///
 void Node::send_to(std::string message, uint16_t port_me, uint16_t port_to){
-    printf("send from %d to %d: %s\n", port_me, port_to, message.c_str());
+    Package pckg {.from=port_me, .to = port_to, .message_size = message.size()} ;
+    struct sockaddr_in their_addr;
+    
+    memset(&their_addr, 0, sizeof(their_addr));
+    
+    their_addr.sin_family = AF_INET;
+    socklen_t their_addrlen = sizeof(their_addr);
+    their_addr.sin_port = htons(port_to); 
+
+    handle_error(sendto(sockfd, &pckg, sizeof(pckg), 0, (const struct sockaddr*)&their_addr, their_addrlen));
+    handle_error(sendto(sockfd, message.c_str(), message.size(), 0, (const struct sockaddr*)&their_addr, their_addrlen));
+    
     return;
 }
 
 void Node::send_all(std::string message, uint16_t port_me){
-    Package pckg {.from=port_me, .message_size = message.size()};
-    struct sockaddr_in their_addr;
-    memset(&their_addr, 0, sizeof(their_addr));
-    their_addr.sin_family = AF_INET;
-        
-    socklen_t their_addrlen = sizeof(their_addr);
-    
     for (std::vector<Conn_t>::iterator itr = connections.begin();
         itr != connections.end(); itr++){
-            pckg.to = itr->port;
-            their_addr.sin_port = htons(itr->port);
-            handle_error(sendto(sockfd, &pckg, sizeof(pckg), 0, (const struct sockaddr*)&their_addr, their_addrlen));
-            handle_error(sendto(sockfd, message.c_str(), message.size(), 0, (const struct sockaddr*)&their_addr, their_addrlen));
+            send_to(message, port_me, itr->port);
          }
-
     return;
 }
 
@@ -116,12 +116,18 @@ void Node::handle_command(std::string message, uint16_t port_me){
         std::string msg = message;
         msg.erase(i);
         i=0;
+        std::string port = message_parse(message);
         if (msg == "/connect"){
-            std::string port = message_parse(message);
             connect_to(port);
         } else if(msg == "/send"){
-            // TODO
-            }
+            //send :PORT message 
+            int j;
+            for (j=0; port[j] != ' '; j++);
+            std::string message_to_send = port;
+            message_to_send.erase(0, j+1);
+            uint16_t port_to = stoi(port);
+            send_to(message_to_send, port_me, port_to);
+        }
     }
 }
 
@@ -131,11 +137,11 @@ int Node::connect_to(std::string port){
     bool exsist = false;
     std::vector<Conn_t>::iterator itr = connections.begin();
     while(itr != connections.end()){
-        itr++;
         if (itr->port == u_port){
             exsist=true;
             break;
         } 
+        itr++;
     }
     if (!exsist || connections.size() == 0)  {
         connections.push_back(Conn_t{.id=id, .port=u_port});
