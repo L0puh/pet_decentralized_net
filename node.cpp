@@ -8,6 +8,10 @@ int Node::init_socket(std::string port){
     int sockfd = socket(servinfo.sin_family, SOCK_DGRAM, 0);
     handle_error(bind(sockfd, (const struct sockaddr *)&servinfo, sizeof(servinfo)) == -1);
     
+
+    printf("[port:%s] ready to char\n", port.c_str());
+    printf("LIST OF COMMANDS: /connect :PORT, /send :PORT, /quit, /show\n");
+
     return sockfd;
 }
 

@@ -17,7 +17,6 @@ std::string Crypto::code(std::string message, ulong session_key) {
         char sym = (char)message.at(i) ^ session_key % MIN;
         c_message += sym;
     }
-    printf("message before: %s | after: %s | sessiong key: %lu\n", message.c_str(), c_message.c_str(), session_key);
     return c_message;
 }
 
