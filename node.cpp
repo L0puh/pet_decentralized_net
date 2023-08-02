@@ -1,4 +1,5 @@
 #include "node.h"
+#include <cstdint>
 int Node::init_socket(std::string port){ 
     
     struct sockaddr_in servinfo;  
@@ -9,8 +10,8 @@ int Node::init_socket(std::string port){
     handle_error(bind(sockfd, (const struct sockaddr *)&servinfo, sizeof(servinfo)) == -1);
     
 
-    printf("[port:%s] ready to char\n", port.c_str());
-    printf("LIST OF COMMANDS: /connect :PORT, /send :PORT, /quit, /show\n");
+    printf("[PORT:%s | ", port.c_str());
+    printf("LIST OF COMMANDS]\n/connect :PORT\n/send :PORT\n/quit\n/show\n[start the chat]\n");
 
     return sockfd;
 }
@@ -60,9 +61,10 @@ void Node::handle_recv(int sockfd){
             memset(&their_addr, 0, sizeof(their_addr));
             delete[] buff;
 
-        } else if (pckg.type == DISCONN) { //TODO
+        } else if (pckg.type == DISCONN) { 
             printf("[ ! ] user %d is disconnected \n", pckg.addr.from);
             delete_user(pckg.addr.from);
+            continue;
         }
     } 
     handle_error(bytes);
@@ -89,6 +91,17 @@ void Node::handle_send(uint16_t port, int sockfd){
 
 
 /// SEND ///
+
+struct sockaddr_in get_addr(uint16_t port_to ){
+    struct sockaddr_in their_addr;
+    
+    memset(&their_addr, 0, sizeof(their_addr));
+    
+    their_addr.sin_family = AF_INET;
+    their_addr.sin_port = htons(port_to); 
+    return their_addr;
+}
+
 void Node::send_to(std::string message, uint16_t port_me, uint16_t port_to){
     if (message.back() == '\n') {
         message.pop_back();
@@ -97,14 +110,9 @@ void Node::send_to(std::string message, uint16_t port_me, uint16_t port_to){
     Message_t addr {.from=port_me, .to = port_to, .message_size = c_message.size()} ;
     Package_t pckg = {.addr = addr, .type = MESSAGE};
 
-    struct sockaddr_in their_addr;
-    
-    memset(&their_addr, 0, sizeof(their_addr));
-    
-    their_addr.sin_family = AF_INET;
+    struct sockaddr_in their_addr = get_addr(port_to);
     socklen_t their_addrlen = sizeof(their_addr);
-    their_addr.sin_port = htons(port_to); 
-
+    
     handle_error(sendto(sockfd, &pckg, sizeof(pckg), 0, (const struct sockaddr*)&their_addr, their_addrlen));
     handle_error(sendto(sockfd, c_message.c_str(), c_message.size(), 0, (const struct sockaddr*)&their_addr, their_addrlen));
     
@@ -112,13 +120,11 @@ void Node::send_to(std::string message, uint16_t port_me, uint16_t port_to){
 }
 
 void Node::send_to(Package_t pckg){
-   struct sockaddr_in their_addr;
-   memset(&their_addr, 0, sizeof(their_addr));
-   their_addr.sin_family = AF_INET;
+   struct sockaddr_in their_addr = get_addr(pckg.addr.to);
    socklen_t their_addrlen = sizeof(their_addr);
-   their_addr.sin_port = htons(pckg.addr.to);
    handle_error(sendto(sockfd, &pckg, sizeof(pckg), 0, (const struct sockaddr*)&their_addr, their_addrlen));
 }
+
 void Node::send_all(std::string message, uint16_t port_me){
     for (std::vector<Conn_t>::iterator itr = connections.begin();
         itr != connections.end(); itr++){
@@ -146,7 +152,6 @@ void Node::handle_command(std::string message, uint16_t port_me){
     int i=0, j; bool flag = true;
     if (message == "/quit\n") {
         disconnect(port_me);
-        exit(0);
     }
     else if(message == "/show\n") connections_print();
     else {
@@ -207,10 +212,16 @@ void Node::delete_user(uint16_t port_from){
             connections.erase(itr);
             break;
         }
+        itr++;
     }
 }
 void Node::disconnect(uint16_t port_me){
-    /* send_all("DIS", port_me); */ //TODO
+    std::vector<Conn_t>::iterator itr = connections.begin();
+    while(itr != connections.end()){
+        send_to(Package_t{.addr={.from=port_me, .to=itr->port}, .type=DISCONN});
+        itr++;
+    }
+    exit(0);
 }
 int Node::connect_to(std::string port, uint16_t port_me){
     uint16_t u_port = stoi(port);

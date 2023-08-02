@@ -29,6 +29,7 @@ enum types {
     CONN_DENY,
     MESSAGE,
     DISCONN,
+    NONE
 };
 struct Conn_t {
     int id;
