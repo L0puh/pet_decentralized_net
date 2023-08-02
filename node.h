@@ -29,12 +29,14 @@ enum types {
     CONN_DENY,
     MESSAGE,
     DISCONN,
-    NONE
+    NONE,
+    NICK
 };
 struct Conn_t {
     int id;
     uint16_t port;
     ulong session_key; 
+    std::string nick="";
 };
 struct Message_t {
     uint16_t from; 
@@ -89,10 +91,14 @@ class Node : public Crypto {
         void disconnect(uint16_t port_me);
         ulong connection_get_key(uint16_t port);
         void delete_user(uint16_t port_from);
+        void nick_set(char buff[], uint16_t port);
+        std::string nick_get(uint16_t port);
+        void nick_send(std::string nick, uint16_t port_me, int index);
     public:
         void send_to(std::string message, uint16_t port_me, uint16_t port_to);
         void send_to(Package_t pckg);
         void send_all(std::string message, uint16_t port_me);
+        void send_all(Package_t pckg);
     public:
         void handle_send(uint16_t port, int sockfd);
         void handle_recv(int sockfd);

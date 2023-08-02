@@ -10,8 +10,7 @@ int Node::init_socket(std::string port){
     handle_error(bind(sockfd, (const struct sockaddr *)&servinfo, sizeof(servinfo)) == -1);
     
 
-    printf("[PORT:%s | ", port.c_str());
-    printf("LIST OF COMMANDS]\n/connect :PORT\n/send :PORT\n/quit\n/show\n[start the chat]\n");
+    printf("[PORT:%s]\n/help for more info\n", port.c_str());
 
     return sockfd;
 }
@@ -56,15 +55,36 @@ void Node::handle_recv(int sockfd){
 
             handle_error(recvfrom(sockfd, buff, pckg.addr.message_size, 0, (struct sockaddr *)&their_addr, &their_addrlen) > 0);
             std::string message = code(buff, connection_get_key(pckg.addr.from));
-            printf("[%s:%d]: %s\n", inet_ntoa(their_addr.sin_addr), pckg.addr.from, message.c_str());
+            std::string nick = nick_get(pckg.addr.from);
+            if ( nick != "") {
+                printf("[%s]: %s\n", nick.c_str(), message.c_str());
+            } else {
+                printf("[%s:%d]: %s\n", inet_ntoa(their_addr.sin_addr), pckg.addr.from, message.c_str());
+            }
             std::lock_guard<std::mutex> lock(mtx);
             memset(&their_addr, 0, sizeof(their_addr));
             delete[] buff;
 
         } else if (pckg.type == DISCONN) { 
-            printf("[ ! ] user %d is disconnected \n", pckg.addr.from);
+            std::string nick = nick_get(pckg.addr.from);
+            if (nick == "") {
+                printf("[ ! ] user %d is disconnected \n", pckg.addr.from);
+            } else {
+                printf("[ ! ] user %s is disconnected \n", nick.c_str());
+            }
             delete_user(pckg.addr.from);
             continue;
+        } else if(pckg.type == NICK) {
+            char *buff = new char[pckg.addr.message_size + 1];
+            buff[pckg.addr.message_size] = '\0';
+            handle_error(recvfrom(sockfd, buff, pckg.addr.message_size, 0, (struct sockaddr *)&their_addr, &their_addrlen) > 0);
+
+            nick_set(buff, pckg.addr.from);
+            
+            printf("[%hu] user is known as %s\n", pckg.addr.from, buff);
+            std::lock_guard<std::mutex> lock(mtx);
+            memset(&their_addr, 0, sizeof(their_addr));
+            delete[] buff;
         }
     } 
     handle_error(bytes);
@@ -132,6 +152,14 @@ void Node::send_all(std::string message, uint16_t port_me){
          }
     return;
 }
+void Node::send_all(Package_t pckg){
+    for (std::vector<Conn_t>::iterator itr = connections.begin();
+        itr != connections.end(); itr++){
+            pckg.addr.to=itr->port;
+            send_to(pckg);
+         }
+    return;
+}
 
 
 /// MESSAGE ///
@@ -147,13 +175,14 @@ std::string Node::message_get() {
     return msg;
 }
 
-
 void Node::handle_command(std::string message, uint16_t port_me){
     int i=0, j; bool flag = true;
     if (message == "/quit\n") {
         disconnect(port_me);
     }
     else if(message == "/show\n") connections_print();
+    else if(message == "/help\n") 
+        printf("[LIST OF COMMANDS]\n/connect :PORT\n/send :PORT MESSAGE\n/quit\n/show\n/nick :NICK\n");
     else {
         for (const char c: message){
             if (c == ' ') break;
@@ -176,6 +205,8 @@ void Node::handle_command(std::string message, uint16_t port_me){
             
             uint16_t port_to = stoi(port);
             send_to(message_to_send, port_me, port_to);
+        } else if (msg == "/nick") {
+            nick_send(message, port_me, i);
         }
     }
 }
@@ -216,11 +247,7 @@ void Node::delete_user(uint16_t port_from){
     }
 }
 void Node::disconnect(uint16_t port_me){
-    std::vector<Conn_t>::iterator itr = connections.begin();
-    while(itr != connections.end()){
-        send_to(Package_t{.addr={.from=port_me, .to=itr->port}, .type=DISCONN});
-        itr++;
-    }
+    send_all(Package_t{.addr={.from=port_me}, .type=DISCONN});
     exit(0);
 }
 int Node::connect_to(std::string port, uint16_t port_me){
@@ -254,7 +281,7 @@ int Node::connect_to(std::string port, uint16_t port_me){
         };
         pckg.crypto.open_key = (long)pow(pckg.crypto.prim, secret_key) % pckg.crypto.mod;
         send_to(pckg);
-        printf("connected a to port: %s\n", port.c_str());
+        printf("connected a to port: %s", port.c_str());
     }
     return 0;
 }
@@ -262,7 +289,7 @@ void Node::connections_print(){
     printf("[+] your connections: \n");
     for (std::vector<Conn_t>::iterator itr = connections.begin();
             itr != connections.end(); itr++){
-        printf("%d : %hu | %lu \n", itr->id, itr->port, itr->session_key);
+        printf("%d [%s] : %hu | %lu \n", itr->id, itr->nick.c_str(), itr->port, itr->session_key);
     }
 
 }
@@ -273,5 +300,35 @@ void Node::handle_error(int result){
     if (result == -1){
         fprintf(stderr, "error: %s\n", strerror(errno));
         exit(1);
+    }
+}
+void Node::nick_set(char buff[], uint16_t port){
+    for (std::vector<Conn_t>::iterator itr=connections.begin();
+            itr!=connections.end(); itr++){
+        if(itr->port == port) {
+            itr->nick = buff;
+        }
+    }
+}
+std::string Node::nick_get(uint16_t port) {
+    for (std::vector<Conn_t>::iterator itr=connections.begin();
+            itr!=connections.end(); itr++){
+        if(itr->port == port) {
+            return itr->nick;
+        }
+    }
+    return "";
+}
+
+void Node::nick_send(std::string nick, uint16_t port_me, int index){
+    nick.pop_back();
+    nick.erase(0, index+1);
+    send_all(Package_t{.addr={.from=port_me, .message_size = nick.size()}, .type=NICK});
+
+    for(std::vector<Conn_t>::iterator itr = connections.begin();
+            itr != connections.end(); itr++) {
+        struct sockaddr_in addr = get_addr(itr->port);
+        socklen_t their_addrlen = sizeof(addr);
+        handle_error(sendto(sockfd, nick.c_str(), nick.size(), 0, (const struct sockaddr *)&addr, their_addrlen));
     }
 }
